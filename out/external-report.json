@@ -1,0 +1,36 @@
+{
+  "scorer": "signalpost_external_footprint_eval_v1",
+  "claim_boundary": "Self-labeled proxy awaiting organiser blind audit. All labels applied by submitter. Final score requires independent audit of hidden companies.",
+  "profiles": 1000,
+  "observations": 94,
+  "audited_observations": 41,
+  "published_audited": 41,
+  "wrong_entity_publications": 0,
+  "unsupported_publications": 0,
+  "entity_precision": 1.0,
+  "metric_precision": 1.0,
+  "sentiment_audited": 0,
+  "sentiment_accuracy": null,
+  "coverage": {
+    "any_external": 0.034,
+    "two_platforms": 0.0,
+    "workforce_jobs": 0.0,
+    "ratings_reviews": 0.0,
+    "buzz_engagement": 0.034,
+    "sentiment": 0.0
+  },
+  "fresh_coverage": 1.0,
+  "platform_counts": {
+    "company_site": 41
+  },
+  "acquisition_modes": {
+    "permitted_public_page": 41,
+    "rights_review_experiment": 45,
+    "unofficial_api_experiment": 8
+  },
+  "minimum_audit": 100,
+  "audit_size_gate": false,
+  "connector_policy_passed": true,
+  "qualification_passed": false,
+  "connector_policy_note": "Publishable observations use permitted_public_page + rights_status=approved (company_site connector). Experimental connectors (fagfolkguiden/youtube) are correctly suppressed from publications pending organiser approval."
+}

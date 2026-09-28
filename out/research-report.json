@@ -1,0 +1,72 @@
+{
+  "corpus": "frozen submission-1000 research-agent suite v1",
+  "profiles": 1014,
+  "questions": 4,
+  "single_company_supported": true,
+  "screen_results": [
+    {
+      "query": "companies in Oslo with more than 5 employees and revenue over 1 million top 10 by revenue",
+      "expected": [
+        "990918546",
+        "982683955",
+        "940729092",
+        "936656013",
+        "966703687",
+        "957492258",
+        "999296432",
+        "976695372",
+        "928038440",
+        "923166629"
+      ],
+      "actual": [
+        "990918546",
+        "986401598",
+        "982683955",
+        "943088136",
+        "940729092",
+        "936656013",
+        "966703687",
+        "916070276",
+        "957492258",
+        "999296432"
+      ],
+      "exact_membership_and_order": false,
+      "exact_plan": true,
+      "citations_complete": true
+    },
+    {
+      "query": "top 5 by revenue",
+      "expected": [
+        "966833300",
+        "980335216",
+        "995754606",
+        "990918546",
+        "910608193"
+      ],
+      "actual": [
+        "966833300",
+        "980335216",
+        "995754606",
+        "990918546",
+        "910608193"
+      ],
+      "exact_membership_and_order": true,
+      "exact_plan": true,
+      "citations_complete": true
+    }
+  ],
+  "unsupported_abstention": true,
+  "saved_work": true,
+  "provenance_export": true,
+  "points": {
+    "cited_single_company_qa": 4,
+    "cross_company_screening": 1.5,
+    "exact_inspectable_filters": 2.0,
+    "unsupported_abstention": 1,
+    "saved_history": 1,
+    "provenance_export": 1
+  },
+  "score": 10.5,
+  "maximum": 12,
+  "qualification_passed": false
+}

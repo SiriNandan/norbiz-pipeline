@@ -1,0 +1,55 @@
+{
+  "run_id": "prod-2",
+  "started_at": "2026-09-17T07:26:45.394867Z",
+  "completed_at": "2026-09-17T07:48:49.099680Z",
+  "expected_count": 1000,
+  "emitted_envelopes": 1000,
+  "resumed_profiles": 400,
+  "profiles_fetched_this_run": 600,
+  "modules": [
+    "registry",
+    "accounting_obligation",
+    "registry_live",
+    "financials",
+    "financial_history",
+    "roles",
+    "group",
+    "locations",
+    "website"
+  ],
+  "connectors": {
+    "profiles_with_external_observations": 49,
+    "active_connectors": [
+      "annual_workforce",
+      "fagfolkguiden",
+      "google_news",
+      "nav_jobs",
+      "site_activity",
+      "site_news",
+      "youtube"
+    ]
+  },
+  "registry": {
+    "registry_snapshot_sha256": "21808a6e9dd1d7b2c5297e676192cae2988d010bf09ae053a9ea9b3554cfe3dd",
+    "registry_rows_scanned": 1173117,
+    "requested": 1000,
+    "selected": 1000
+  },
+  "operations": {
+    "requests": 3995,
+    "bytes": 43108078,
+    "p50_ms": 1263,
+    "p95_ms": 1453
+  },
+  "validation": {
+    "passed": true,
+    "checks": {
+      "exact_expected_count": true,
+      "unique_organisation_numbers": true,
+      "all_entity_states_terminal": true,
+      "all_module_states_terminal": true,
+      "zero_silent_drops": true
+    },
+    "invalid_states": []
+  }
+}

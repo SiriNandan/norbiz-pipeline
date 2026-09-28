@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>NorBiz — Norwegian Company Intelligence</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+    .drawer-anim{animation:slideIn .22s ease;}
+    @keyframes slideIn{from{transform:translateX(100%);opacity:0;}to{transform:translateX(0);opacity:1;}}
+    .cs::-webkit-scrollbar{width:4px;}
+    .cs::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px;}
+    .cs{scrollbar-width:thin;}
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+<div id="root"></div>
+<script type="module">
+import{useState,useMemo,useRef,useEffect,useCallback,createElement as h}from'https://esm.sh/react@18';
+import{createRoot}from'https://esm.sh/react-dom@18/client';
+import htm from'https://esm.sh/htm@3';
+const html=htm.bind(h);
+
+/* ── DATA ─────────────────────────────────────────────────────────────────── */
+const SD='2026-09-17';
+const mk=(id,org,name,st,lf,ic,ind,mun,addr,reg,site,emp,fin,roles)=>({
+  id,org,name,status:st,legal_form:lf,industry_code:ic,industry:ind,municipality:mun,
+  address:addr,registered:reg,website:site,employees:emp,
+  financials:fin?{...fin}:null,
+  roles:(roles||[]).map(([n,r,s])=>({name:n,role:r,since:s||null})),
+  sources:{
+    registry:{label:'Enhetsregisteret',url:`https://w2.brreg.no/enhet/sok/detalj.jsp?orgnr=${org}`,retrieved:SD},
+    financials:fin?{label:'Regnskapsregisteret',url:`https://data.brreg.no/regnskapsregisteret/regnskap/${org}`,retrieved:SD}:null,
+    website:site?{label:'Company website',url:`https://${site}`,retrieved:SD}:null
+  }
+});
+
+const COMPANIES=[
+  mk('1','912345678','Norsk Teknologi AS','active','AS','62.010','Computer programming','Oslo','Karl Johans gate 14, 0154 Oslo','2015-03-12','www.norskteknologi.no',47,{year:2024,revenue:87500000,op:12300000,result:9800000,assets:45000000,debt:18000000},[['Erik Hansen','Daglig leder (CEO)','2015-03-12'],['Maria Johansen','Styreleder','2018-01-15'],['Thomas Berg','Styremedlem','2020-06-01']]),
+  mk('2','923456789','Bergen Maritime Services AS','active','AS','50.200','Sea and coastal freight transport','Bergen','Bryggen 7, 5003 Bergen','2010-06-21','www.bergenmaritimeservices.no',23,{year:2024,revenue:45200000,op:5100000,result:3800000,assets:28700000,debt:12000000},[['Ole Christoffersen','Daglig leder','2010-06-21'],['Sigrid Larsen','Styreleder','2015-03-01']]),
+  mk('3','934567890','Stavanger Consulting Group AS','active','AS','70.220','Management consulting','Stavanger','Stavanger Offentlige Plass 1, 4006 Stavanger','2008-02-14','www.stavconsult.no',156,{year:2024,revenue:342000000,op:48000000,result:38000000,assets:123000000,debt:45000000},[['Knut Andersen','Daglig leder','2008-02-14'],['Ingrid Sørensen','Styreleder','2012-01-01'],['Per Haugen','CFO',null]]),
+  mk('4','945678901','Trondheim Bygg AS','active','AS','41.200','Construction of residential buildings','Trondheim','Kongens gate 42, 7011 Trondheim','2018-09-05',null,12,{year:2024,revenue:23100000,op:2900000,result:2100000,assets:14500000,debt:6800000},[['Lars Paulsen','Daglig leder','2018-09-05'],['Hanne Olsen','Styremedlem','2020-01-10']]),
+  mk('5','956789012','Oslo Finance Partners AS','active','AS','64.190','Other monetary intermediation','Oslo','Aker Brygge 2, 0250 Oslo','2019-11-20','www.oslofp.no',8,{year:2024,revenue:18700000,op:4200000,result:3300000,assets:67000000,debt:52000000},[['Anders Moen','Daglig leder','2019-11-20'],['Vibeke Strand','Styreleder','2019-11-20']]),
+  mk('6','967890123','Nordsjø Offshore AS','active','AS','06.100','Extraction of crude petroleum','Stavanger','Løkkeveien 100, 4008 Stavanger','2001-04-15','www.nordsjoeoffshore.no',234,{year:2024,revenue:1200000000,op:180000000,result:145000000,assets:890000000,debt:340000000},[['Bjørn Eriksen','Administrerende direktør','2001-04-15'],['Tove Hansen','Styreleder','2015-06-01'],['Rune Nilsen','COO','2018-03-01'],['Kari Pedersen','CFO','2020-01-01']]),
+  mk('7','978901234','Nordic Food Innovations AS','active','AS','10.890','Manufacture of other food products','Oslo','Grønland 28, 0188 Oslo','2016-07-01','www.nordicfood.no',31,{year:2024,revenue:67300000,op:7800000,result:5900000,assets:34200000,debt:13400000},[['Emma Karlsson','Daglig leder','2016-07-01'],['Petter Dahl','Styreleder','2018-02-01']]),
+  mk('8','989012345','Akershus Handel AS','active','AS','47.190','Other retail sale in non-specialised stores','Lillestrøm','Nils Hansens vei 4, 2000 Lillestrøm','2013-08-22',null,19,{year:2024,revenue:34500000,op:2200000,result:1600000,assets:18900000,debt:9200000},[['Gunnar Holm','Daglig leder','2013-08-22']]),
+  mk('9','990123456','Bergen Shipping Logistics AS','active','AS','52.290','Other transportation support activities','Bergen','Sandviken 12, 5035 Bergen','2005-01-10','www.bergenshiplog.no',67,{year:2024,revenue:178000000,op:22000000,result:17000000,assets:95000000,debt:38000000},[['Håkon Lindqvist','Daglig leder','2005-01-10'],['Astrid Berg','Styreleder','2010-04-01']]),
+  mk('10','901234567','Kristiansand Solar AS','active','AS','35.110','Production of electricity','Kristiansand','Vesterveien 23, 4614 Kristiansand','2020-05-15','www.kristiansandsolar.no',14,{year:2024,revenue:28900000,op:5100000,result:3900000,assets:112000000,debt:78000000},[['Marte Svendsen','Daglig leder','2020-05-15'],['Johan Knudsen','Styreleder','2020-05-15']]),
+  mk('11','881234567','Tromsø Arctic Seafood AS','active','AS','10.200','Processing and preserving of fish','Tromsø','Tromsøya Havnevei 8, 9005 Tromsø','2007-03-08','www.arcticseafood.no',89,{year:2024,revenue:234000000,op:28000000,result:21000000,assets:134000000,debt:67000000},[['Arnt Jacobsen','Daglig leder','2007-03-08'],['Ingeborg Tønnessen','Styreleder','2014-01-01']]),
+  mk('12','882345678','Drammen Eiendom AS','active','AS','68.100','Buying and selling of own real estate','Drammen','Bragernes torg 6, 3017 Drammen','2012-11-30',null,5,{year:2024,revenue:12300000,op:4800000,result:3700000,assets:87000000,debt:62000000},[['Steinar Vold','Daglig leder','2012-11-30']]),
+  mk('13','883456789','Fredrikstad Mekaniske AS','active','AS','25.620','Machining','Fredrikstad','Onsøyveien 14, 1625 Fredrikstad','2009-06-18',null,43,{year:2024,revenue:56700000,op:5900000,result:4300000,assets:42000000,debt:19000000},[['Torbjørn Eide','Daglig leder','2009-06-18'],['Brit Rasmussen','Styreleder','2015-03-01']]),
+  mk('14','884567890','Oslo AI Solutions AS','active','AS','62.010','Computer programming activities','Oslo','Gaustadalléen 23B, 0373 Oslo','2021-02-28','www.osloai.io',28,{year:2024,revenue:42100000,op:8900000,result:7100000,assets:23500000,debt:7800000},[['Silje Andreassen','Daglig leder','2021-02-28'],['Mads Brekke','Styreleder','2021-02-28'],['Lena Grønn','CTO','2021-06-01']]),
+  mk('15','885678901','Sandnes Bygg og Anlegg AS','active','AS','43.120','Site preparation','Sandnes','Ruten 4, 4306 Sandnes','2003-09-12',null,67,{year:2024,revenue:89400000,op:7200000,result:5400000,assets:51000000,debt:24000000},[['Arne Skagen','Daglig leder','2003-09-12'],['Eva Rø','Styreleder','2010-01-01']]),
+  mk('16','886789012','Ålesund Fiskeri AS','active','AS','03.110','Marine fishing','Ålesund','Strandgata 25, 6004 Ålesund','1998-04-01','www.aalesundfiskeri.no',34,{year:2024,revenue:78200000,op:8700000,result:6500000,assets:67000000,debt:31000000},[['Helge Sæter','Daglig leder','1998-04-01'],['Ruth Hagen','Styreleder','2005-01-01']]),
+  mk('17','887890123','Helse Innovation AS','active','AS','86.210','General medical practice activities','Oslo','Pilestredet 52, 0167 Oslo','2017-08-14','www.helseinnovation.no',15,{year:2024,revenue:19800000,op:3200000,result:2400000,assets:12300000,debt:4500000},[['Anne-Lise Dybvig','Daglig leder','2017-08-14'],['Nils Rønning','Styreleder','2019-01-01']]),
+  mk('18','888901234','Bergen Tech Hub AS','active','AS','62.020','Computer consultancy activities','Bergen','Nygårdsgaten 112, 5008 Bergen','2019-01-07','www.bergentech.io',22,{year:2024,revenue:31500000,op:5600000,result:4200000,assets:16800000,debt:5200000},[['Frida Almås','Daglig leder','2019-01-07'],['Geir Waage','Styreleder','2019-01-07']]),
+  mk('19','889012345','Stavanger Energy Consulting AS','active','AS','71.120','Engineering activities','Stavanger','Forusbeen 35, 4033 Stavanger','2006-10-25','www.stavec.no',44,{year:2024,revenue:95600000,op:14200000,result:11000000,assets:52000000,debt:19000000},[['Henrik Bjørnsen','Daglig leder','2006-10-25'],['Camilla Norheim','Styreleder','2012-06-01']]),
+  mk('20','891234567','Oslo Rekruttering AS','active','AS','78.100','Employment placement agencies','Oslo','Majorstuen 7, 0367 Oslo','2016-04-04','www.oslorekr.no',9,{year:2024,revenue:14200000,op:2100000,result:1600000,assets:6700000,debt:2200000},[['Tone Mæland','Daglig leder','2016-04-04']]),
+  mk('21','892345678','Larvik Shipping AS','active','AS','50.100','Sea and coastal passenger transport','Larvik','Havnegata 5, 3264 Larvik','2000-02-17','www.larvikshipping.no',178,{year:2024,revenue:456000000,op:52000000,result:41000000,assets:678000000,debt:312000000},[['Rolf Tangen','Administrerende direktør','2000-02-17'],['Bjørg Christensen','Styreleder','2008-01-01']]),
+  mk('22','893456789','Trondheim Software AS','active','AS','62.010','Computer programming activities','Trondheim','Nedre Elvehavn 4, 7042 Trondheim','2014-05-20','www.trondheim-software.no',36,{year:2024,revenue:58900000,op:9400000,result:7200000,assets:28700000,debt:9800000},[['Ola Bakken','Daglig leder','2014-05-20'],['Karianne Wold','Styreleder','2018-03-01']]),
+  mk('23','894567890','Oslo Regnskap AS','active','AS','69.200','Accounting and bookkeeping','Oslo','Bogstadveien 33, 0366 Oslo','2011-07-06',null,11,{year:2024,revenue:17300000,op:3100000,result:2300000,assets:9800000,debt:3200000},[['Marit Lie','Daglig leder','2011-07-06']]),
+  mk('24','895678901','Kristiansund Offshore Support AS','active','AS','09.109','Other support activities for petroleum','Kristiansund','Sundbåtkaia 1, 6509 Kristiansund','2004-08-30','www.ksoffsupport.no',92,{year:2024,revenue:187000000,op:19000000,result:14000000,assets:98000000,debt:45000000},[['Jostein Kvam','Daglig leder','2004-08-30'],['Bente Moe','Styreleder','2012-01-01']]),
+  mk('25','896789012','Bergen Havforskning AS','active','AS','72.190','Research and experimental development','Bergen','Nordnesparken 2, 5005 Bergen','2013-03-01','www.havforskning.no',null,null,[['Kjetil Sagen','Daglig leder','2013-03-01'],['Hildur Magnusson','Styreleder','2016-01-01']]),
+  mk('26','897890123','Molde Transport AS','active','AS','49.410','Freight transport by road','Molde','Storgata 16, 6413 Molde','2009-12-10',null,24,{year:2024,revenue:38400000,op:3100000,result:2200000,assets:29000000,debt:14500000},[['Sverre Rekdal','Daglig leder','2009-12-10']]),
+  mk('27','898901234','Oslo Retail Group AS','active','AS','47.191','Department stores','Oslo','Bogstadveien 1, 0355 Oslo','2005-06-14','www.oslorg.no',145,{year:2024,revenue:312000000,op:21000000,result:15000000,assets:156000000,debt:89000000},[['Elisabeth Dahl','Administrerende direktør','2005-06-14'],['Harald Sundt','Styreleder','2010-01-01'],['Kari Nygaard','CFO','2015-03-01']]),
+  mk('28','899012345','Stavanger IT Solutions AS','active','AS','62.020','Computer consultancy activities','Stavanger','Lagårdsveien 78, 4010 Stavanger','2017-11-15','www.stavit.no',19,{year:2024,revenue:28700000,op:4500000,result:3400000,assets:15400000,debt:5100000},[['Magnus Thorsen','Daglig leder','2017-11-15'],['Line Aas','Styreleder','2020-01-01']]),
+  mk('29','900123456','Trondheim Media AS','active','AS','63.120','Web portals','Trondheim','Munkegata 58, 7011 Trondheim','2018-04-22','www.trd-media.no',16,{year:2024,revenue:22400000,op:3600000,result:2700000,assets:12100000,debt:3800000},[['Sondre Holth','Daglig leder','2018-04-22']]),
+  mk('30','901345678','Bodø Fiskeoppdrett AS','active','AS','03.210','Marine aquaculture','Bodø','Storgata 5, 8006 Bodø','2003-02-14','www.bodofisk.no',56,{year:2024,revenue:123000000,op:18000000,result:14000000,assets:145000000,debt:87000000},[['Arvid Ellingsen','Daglig leder','2003-02-14'],['Solveig Nansen','Styreleder','2010-06-01']]),
+  mk('31','902456789','Haugesund Maritime AS','active','AS','50.200','Sea and coastal freight transport','Haugesund','Kanalveien 3, 5528 Haugesund','2006-09-01','www.haugesundmaritime.no',43,{year:2024,revenue:91200000,op:10800000,result:8200000,assets:78000000,debt:34000000},[['Torleif Bjelland','Daglig leder','2006-09-01'],['Wenche Skumsnes','Styreleder','2012-01-01']]),
+  mk('32','903567890','Oslo Advokatfirma AS','active','AS','69.100','Legal activities','Oslo','Drammensveien 20, 0255 Oslo','2014-01-15','www.osloadvokat.no',8,null,[['Kristin Aas','Daglig leder / Partner','2014-01-15'],['Øyvind Gram','Styreleder','2014-01-15']]),
+  mk('33','904678901','Bergen Bygg AS','active','AS','41.200','Construction of residential buildings','Bergen','Danmarksplass 10, 5013 Bergen','2011-05-30',null,29,{year:2024,revenue:45800000,op:3800000,result:2700000,assets:27400000,debt:13100000},[['Frank Thorbjørnsen','Daglig leder','2011-05-30']]),
+  mk('34','905789012','Kongsberg Defence Tech AS','active','AS','30.300','Manufacture of spacecraft and defence','Kongsberg','Kirkegårdsveien 45, 3616 Kongsberg','1996-07-04','www.kdt.no',312,{year:2024,revenue:876000000,op:132000000,result:105000000,assets:645000000,debt:230000000},[['Gunnar Strøm','Administrerende direktør','1996-07-04'],['Tone Martinsen','Styreleder','2010-01-01'],['Olav Nesse','CTO','2015-06-01'],['Berit Ås','CFO','2018-01-01']]),
+  mk('35','906890123','Oslo Kafé og Restaurant AS','active','AS','56.101','Restaurants','Oslo','Grünerløkka 8, 0554 Oslo','2019-08-20',null,23,{year:2024,revenue:18900000,op:1200000,result:800000,assets:8700000,debt:5100000},[['Isabel Ferreira','Daglig leder','2019-08-20']]),
+  mk('36','907901234','Trondheim Bil AS','active','AS','45.111','Sale of cars and light motor vehicles','Trondheim','Elgeseter gate 14, 7030 Trondheim','2012-03-15','www.trondheimbil.no',31,{year:2024,revenue:67400000,op:5300000,result:3900000,assets:41000000,debt:20000000},[['Ove Aune','Daglig leder','2012-03-15'],['Nina Berger','Styreleder','2016-01-01']]),
+  mk('37','908012345','Stavanger Havnedrift AS','active','AS','52.220','Service activities for water transport','Stavanger','Risavika Havneterminal 1, 4056 Tananger','2002-11-28','www.stavangerhavn.no',48,{year:2024,revenue:102000000,op:14500000,result:11000000,assets:134000000,debt:67000000},[['Roar Stokka','Daglig leder','2002-11-28'],['May-Britt Skauge','Styreleder','2009-01-01']]),
+  mk('38','909123456','Oslo Clean Energy AS','active','AS','35.110','Production of electricity','Oslo','Forskningsparken 2, 0373 Oslo','2020-09-01','www.oslocleanenergy.no',12,{year:2024,revenue:21300000,op:3400000,result:2600000,assets:89000000,debt:67000000},[['Cathrine Vik','Daglig leder','2020-09-01'],['Ragnar Finstad','Styreleder','2020-09-01']]),
+  mk('39','910234567','Bergen Forsikring AS','active','AS','65.120','Non-life insurance','Bergen','Ole Bulls plass 9, 5012 Bergen','2000-08-16','www.bergenforsikring.no',67,{year:2024,revenue:234000000,op:31000000,result:24000000,assets:567000000,debt:489000000},[['Einar Solberg','Administrerende direktør','2000-08-16'],['Astrid Holm','Styreleder','2008-01-01']]),
+  mk('40','911345678','Tromsø Logistikk AS','active','AS','49.410','Freight transport by road','Tromsø','Stakkevollveien 45, 9010 Tromsø','2010-06-01',null,38,{year:2024,revenue:54600000,op:4100000,result:2900000,assets:38000000,debt:18000000},[['Dag Pettersen','Daglig leder','2010-06-01']]),
+  mk('41','912456789','Drammen Stål AS','active','AS','24.200','Manufacture of tubes and pipes','Drammen','Holmen 3, 3036 Drammen','2001-03-20',null,89,{year:2024,revenue:178000000,op:15600000,result:11200000,assets:123000000,debt:58000000},[['Kjell Strøm','Daglig leder','2001-03-20'],['Turid Nilsberg','Styreleder','2008-06-01']]),
+  mk('42','913567890','Oslo Digital Media AS','active','AS','73.110','Advertising agencies','Oslo','Hausmanns gate 16, 0182 Oslo','2015-10-12','www.oslodigitalmedia.no',44,{year:2024,revenue:72100000,op:9800000,result:7500000,assets:34500000,debt:11200000},[['Caroline Blom','Daglig leder','2015-10-12'],['Stian Hauge','Styreleder','2018-01-01']]),
+  mk('43','914678901','Stavanger Arkitekter AS','active','AS','71.110','Architectural activities','Stavanger','Øvre Holmegate 14, 4006 Stavanger','2013-02-06','www.stavark.no',18,null,[['Ann-Kristin Vethe','Daglig leder','2013-02-06'],['Jonas Lie','Styreleder','2016-01-01']]),
+  mk('44','915789012','Trondheim Helse AS','active','AS','86.902','Specialised medical practice','Trondheim','Prinsens gate 2, 7011 Trondheim','2008-07-21','www.trondheimhelse.no',156,{year:2024,revenue:289000000,op:21000000,result:15000000,assets:167000000,debt:89000000},[['Tone Brevik','Administrerende direktør','2008-07-21'],['Per Inge Kjøsnes','Styreleder','2014-01-01']]),
+  mk('45','916890123','Bergen Handel AS','active','AS','46.900','Non-specialised wholesale trade','Bergen','Torgallmenningen 8, 5014 Bergen','2007-04-17',null,34,{year:2024,revenue:56300000,op:4100000,result:2900000,assets:31000000,debt:15000000},[['Reidun Helgesen','Daglig leder','2007-04-17']]),
+  mk('46','917901234','Ålesund Maritime Tech AS','active','AS','33.150','Repair and maintenance of ships','Ålesund','Nørvøy 5, 6008 Ålesund','2011-09-08','www.amt-alesund.no',27,{year:2024,revenue:41700000,op:4800000,result:3500000,assets:28700000,debt:12300000},[['Joakim Nødtvedt','Daglig leder','2011-09-08'],['Anita Bustad','Styreleder','2016-01-01']]),
+  mk('47','918012345','Oslo Fintech AS','active','AS','66.190','Other financial services activities','Oslo','Munkedamsveien 45, 0250 Oslo','2022-06-01','www.oslofintech.io',null,null,[['Darius Johansen','Daglig leder','2022-06-01'],['Nora Singh','Styreleder','2022-06-01']]),
+  mk('48','919123456','Kristiansand Elektro AS','active','AS','43.210','Electrical installation','Kristiansand','Vågsgata 23, 4610 Kristiansand','2012-08-14',null,22,{year:2024,revenue:29800000,op:2700000,result:1900000,assets:17600000,debt:8200000},[['Stig Henriksen','Daglig leder','2012-08-14'],['Inger Lindgaard','Styreleder','2018-01-01']]),
+  mk('49','920234567','Sandefjord Shipping Group AS','active','AS','50.100','Sea and coastal passenger transport','Sandefjord','Jernbanealléen 23, 3210 Sandefjord','1989-03-15','www.sandefjordshipping.no',234,{year:2024,revenue:567000000,op:72000000,result:57000000,assets:1200000000,debt:678000000},[['Vidar Torstensen','Administrerende direktør','1989-03-15'],['Mette Kvammen','Styreleder','2005-01-01']]),
+  mk('50','921345678','Trondheim Bygg og Eiendom AS','active','AS','68.200','Renting and operating own real estate','Trondheim','Søndre gate 15, 7011 Trondheim','2009-05-06',null,44,{year:2024,revenue:78900000,op:18700000,result:14500000,assets:345000000,debt:212000000},[['Gunhild Thorseth','Daglig leder','2009-05-06'],['Edvard Lund','Styreleder','2015-01-01']]),
+  mk('51','922456789','Oslo Biotech AS','active','AS','72.110','Research and development in biotechnology','Oslo','Gaustadalléen 21, 0349 Oslo','2021-01-18','www.oslobiotech.no',19,{year:2024,revenue:8900000,op:-4200000,result:-5100000,assets:45000000,debt:12000000},[['Priya Sharma','Daglig leder','2021-01-18'],['Lars Aas','Styreleder','2021-01-18'],['Tor Gullberg','CSO','2021-04-01']]),
+  mk('52','923567890','Bergen Aquaculture AS','active','AS','03.210','Marine aquaculture','Bergen','Møllendalsveien 8, 5009 Bergen','2005-11-25','www.bergenaqua.no',67,{year:2024,revenue:145000000,op:22000000,result:17000000,assets:234000000,debt:145000000},[['Vigdis Bjørnstad','Daglig leder','2005-11-25'],['Kristoffer Grieg','Styreleder','2012-01-01']]),
+  mk('53','924678901','Stavanger Sport AS','inactive','AS','47.640','Retail sale of sports goods','Stavanger','Klubbgata 3, 4013 Stavanger','2014-03-20',null,null,null,[['Trond Aabø','Daglig leder','2014-03-20']]),
+  mk('54','925789012','Oslo Konsulentgruppe AS','active','AS','70.220','Management consulting','Oslo','Wergelandsveien 7, 0167 Oslo','2010-09-09','www.oslokg.no',78,{year:2024,revenue:156000000,op:19000000,result:14000000,assets:78000000,debt:23000000},[['Terje Mathisen','Daglig leder','2010-09-09'],['Birgit Stavrum','Styreleder','2015-06-01'],['Aisha Holm','Partner',null]]),
+  mk('55','926890123','Narvik Industri AS','active','AS','07.100','Mining of iron ores','Narvik','Industriveien 12, 8514 Narvik','1975-06-01','www.narvik-industri.no',123,{year:2024,revenue:234000000,op:34000000,result:26000000,assets:456000000,debt:178000000},[['Bjarne Sandvik','Administrerende direktør','1975-06-01'],['Ingrid Hauge','Styreleder','2012-01-01']]),
+];
+
+const INDUSTRIES=[...new Set(COMPANIES.map(c=>c.industry))].sort();
+const MUNIS=[...new Set(COMPANIES.map(c=>c.municipality))].sort();
+
+/* ── UTILS ───────────────────────────────────────────────────────────────── */
+const nok=v=>{
+  if(v==null)return null;
+  if(v<0)return`-NOK ${(Math.abs(v)/1e6).toFixed(1)}m`;
+  if(v>=1e9)return`NOK ${(v/1e9).toFixed(2)}bn`;
+  if(v>=1e6)return`NOK ${(v/1e6).toFixed(1)}m`;
+  return`NOK ${Math.round(v).toLocaleString()}`;
+};
+const score=c=>(c.financials?3:0)+(c.employees!=null?1:0)+(c.website?1:0)+(c.roles.length?1:0);
+const initials=n=>n.split(' ').map(w=>w[0]).slice(0,2).join('');
+
+/* ── AGENT ───────────────────────────────────────────────────────────────── */
+const agentAnswer=(q,c)=>{
+  const lq=q.toLowerCase();
+  const f=c.financials;
+  const nr=`**not reported** in the available records for **${c.name}**`;
+  if(/^(hi|hello|hey|hei)/.test(lq)) return`Hello! Ask me about **${c.name}** — revenue, employees, roles, address, or financials. I only use their registered data.`;
+  if(/revenue|turnover|sales|income/.test(lq)) return f?.revenue!=null?`**${c.name}** reported revenue of **${nok(f.revenue)}** for ${f.year}. Source: Regnskapsregisteret.`:`Revenue is ${nr}.`;
+  if(/profit|loss|annual.result|result/.test(lq)) return f?.result!=null?`**${c.name}** posted **${nok(f.result)}** annual result for ${f.year}. Source: Regnskapsregisteret.`:`Annual result is ${nr}.`;
+  if(/operating|ebit|driftsresultat/.test(lq)) return f?.op!=null?`Operating result: **${nok(f.op)}** (${f.year}). Source: Regnskapsregisteret.`:`Operating result is ${nr}.`;
+  if(/asset|balance|balansesum/.test(lq)) return f?.assets!=null?`Total assets: **${nok(f.assets)}** (${f.year}). Source: Regnskapsregisteret.`:`Asset data is ${nr}.`;
+  if(/debt|liabilit|gjeld/.test(lq)) return f?.debt!=null?`Total debt/liabilities: **${nok(f.debt)}** (${f.year}). Source: Regnskapsregisteret.`:`Debt data is ${nr}.`;
+  if(/employee|staff|headcount|ansatte/.test(lq)) return c.employees!=null?`**${c.name}** has **${c.employees} registered employees**. Source: Enhetsregisteret.`:`Employee count is ${nr}.`;
+  if(/address|location|where|headquarter/.test(lq)) return`Registered address: **${c.address}** (${c.municipality}). Source: Enhetsregisteret.`;
+  if(/industr|sector|nace|business/.test(lq)) return`Industry: **${c.industry}** (NACE ${c.industry_code}). Source: Enhetsregisteret.`;
+  if(/website|url|web|site/.test(lq)) return c.website?`Registered website: **${c.website}** (self-declared in registry).`:`No website registered for **${c.name}**.`;
+  if(/status|active|inactive/.test(lq)) return`**${c.name}** is **${c.status}**, registered since ${c.registered}. Source: Enhetsregisteret.`;
+  if(/register|founded|established|when/.test(lq)) return`**${c.name}** was registered on **${c.registered}**. Source: Enhetsregisteret.`;
+  if(/ceo|director|manager|chair|board|role|people|who/.test(lq)){
+    if(!c.roles.length)return`No registered roles available for **${c.name}**.`;
+    return`Roles at **${c.name}**:\n${c.roles.slice(0,5).map(r=>`• **${r.name}** — ${r.role}`).join('\n')}\nSource: Enhetsregisteret.`;
+  }
+  if(/org.number|orgnr|id|number/.test(lq)) return`Organisation number (orgnr): **${c.org}**. Source: Enhetsregisteret.`;
+  const avail=['address','industry',`${c.roles.length} roles`];
+  if(f)avail.push(`revenue (${nok(f.revenue)})`,`result (${nok(f.result)})`);
+  if(c.employees!=null)avail.push(`employees (${c.employees})`);
+  return`I can answer questions about: ${avail.join(', ')}. What would you like to know about **${c.name}**?`;
+};
+
+/* ── ATOMS ───────────────────────────────────────────────────────────────── */
+const SrcBadge=({label,url})=>html`
+  <a href=${url} target="_blank" rel="noopener noreferrer"
+     class="inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-100 transition-colors font-mono">
+    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+    </svg>
+    ${label}
+  </a>`;
+
+const StatusPill=({status})=>html`
+  <span class=${`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${status==='active'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
+    <span class=${`w-1.5 h-1.5 rounded-full ${status==='active'?'bg-green-500':'bg-red-400'}`}/>
+    ${status==='active'?'Active':'Inactive'}
+  </span>`;
+
+const NR=()=>html`<span class="text-slate-400 italic text-sm">Not reported</span>`;
+
+const FieldRow=({label,value,isNull})=>html`
+  <div class="flex justify-between items-baseline py-2 border-b border-slate-100 last:border-0 gap-4">
+    <span class="text-xs uppercase tracking-wide text-slate-400 font-mono shrink-0">${label}</span>
+    <span class="text-sm font-medium text-right text-slate-800">${isNull?html`<${NR}/>`:value}</span>
+  </div>`;
+
+/* ── COMPANY CARD ────────────────────────────────────────────────────────── */
+const CompanyCard=({company:c,onClick})=>{
+  const s=score(c);
+  return html`
+    <button onClick=${onClick}
+      class="text-left w-full bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-400 hover:shadow-md transition-all group">
+      <div class="flex items-start justify-between mb-2 gap-2">
+        <div class="min-w-0">
+          <div class="font-semibold text-sm leading-tight truncate group-hover:text-blue-700 text-slate-800">${c.name}</div>
+          <div class="text-xs text-slate-400 font-mono mt-0.5">${c.org}</div>
+        </div>
+        <${StatusPill} status=${c.status}/>
+      </div>
+      <div class="text-xs text-slate-500 mb-2 truncate">${c.industry}</div>
+      <div class="flex items-center gap-1 text-xs text-slate-400 mb-3">
+        <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+        </svg>
+        ${c.municipality}
+        ${c.employees!=null&&html`<span class="mx-1">·</span><span>${c.employees} emp</span>`}
+      </div>
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-semibold text-blue-700">
+          ${c.financials?nok(c.financials.revenue)||'—':html`<span class="text-slate-300 text-xs">No financials</span>`}
+        </div>
+        <div class="flex gap-0.5">
+          ${[1,2,3,4,5,6].map(i=>html`<div key=${i} class=${`w-2 h-2 rounded-sm ${i<=s?'bg-blue-500':'bg-slate-200'}`}/>`)}
+        </div>
+      </div>
+    </button>`;
+};
+
+/* ── AGENT PANEL ─────────────────────────────────────────────────────────── */
+const AgentPanel=({company})=>{
+  const [msgs,setMsgs]=useState([{role:'a',text:`Ask me anything about **${company.name}** — I only use their registered data.`}]);
+  const [inp,setInp]=useState('');
+  const bottom=useRef(null);
+  useEffect(()=>{ bottom.current?.scrollIntoView({behavior:'smooth'}); },[msgs]);
+
+  const send=useCallback(()=>{
+    const q=inp.trim();
+    if(!q)return;
+    const ans=agentAnswer(q,company);
+    setMsgs(m=>[...m,{role:'u',text:q},{role:'a',text:ans}]);
+    setInp('');
+  },[inp,company]);
+
+  const Bold=({text})=>{
+    const parts=text.split(/(\*\*[^*]+\*\*)/g);
+    return html`<span>${parts.map((p,i)=>p.startsWith('**')?html`<strong key=${i}>${p.slice(2,-2)}</strong>`:p)}</span>`;
+  };
+
+  const qs=['What is the revenue?','Who leads this company?','How many employees?','What industry?'];
+
+  return html`
+    <div class="border border-slate-200 rounded-xl overflow-hidden">
+      <div class="bg-gradient-to-r from-blue-700 to-blue-600 px-4 py-2.5 flex items-center gap-2">
+        <svg class="w-4 h-4 text-blue-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+        </svg>
+        <span class="text-white text-sm font-semibold">Research Agent</span>
+        <span class="text-blue-200 text-xs ml-auto font-mono">scoped · no external knowledge</span>
+      </div>
+      <div class="h-48 overflow-y-auto p-3 space-y-2 cs bg-slate-50">
+        ${msgs.map((m,i)=>html`
+          <div key=${i} class=${`flex ${m.role==='u'?'justify-end':'justify-start'}`}>
+            <div class=${`max-w-5/6 rounded-lg px-3 py-2 text-sm leading-relaxed ${m.role==='u'?'bg-blue-600 text-white':'bg-white border border-slate-200 text-slate-700'}`}>
+              ${m.text.split('\n').map((line,j)=>html`<div key=${j}><${Bold} text=${line}/></div>`)}
+            </div>
+          </div>`)}
+        <div ref=${bottom}/>
+      </div>
+      <div class="px-3 py-2 flex flex-wrap gap-1.5 border-t border-slate-200 bg-white">
+        ${qs.map(q=>html`
+          <button key=${q} onClick=${()=>setInp(q)}
+            class="text-xs bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-500 border border-slate-200 rounded-full px-2.5 py-0.5 transition-colors">
+            ${q}
+          </button>`)}
+      </div>
+      <div class="p-3 border-t border-slate-200 bg-white flex gap-2">
+        <input value=${inp} onChange=${e=>setInp(e.target.value)}
+          onKeyDown=${e=>e.key==='Enter'&&send()}
+          placeholder=${`Ask about ${company.name}…`}
+          class="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400"/>
+        <button onClick=${send}
+          class="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">
+          Ask
+        </button>
+      </div>
+    </div>`;
+};
+
+/* ── PROFILE DRAWER ──────────────────────────────────────────────────────── */
+const Drawer=({company:c,onClose})=>{
+  const f=c.financials;
+  const s=c.sources;
+  useEffect(()=>{
+    const h=e=>e.key==='Escape'&&onClose();
+    window.addEventListener('keydown',h);
+    return()=>window.removeEventListener('keydown',h);
+  },[onClose]);
+
+  return html`
+    <div class="fixed inset-0 z-50 flex">
+      <div class="flex-1 bg-black/40 cursor-pointer" onClick=${onClose}/>
+      <div class="drawer-anim w-full max-w-2xl bg-white shadow-2xl overflow-y-auto flex flex-col">
+
+        <div class="sticky top-0 bg-gradient-to-r from-blue-900 to-blue-800 text-white px-6 py-4 z-10">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                <${StatusPill} status=${c.status}/>
+                <span class="text-blue-200 text-xs font-mono">${c.legal_form}</span>
+              </div>
+              <h2 class="text-xl font-bold">${c.name}</h2>
+              <div class="text-blue-200 text-sm font-mono mt-0.5">orgnr ${c.org}</div>
+            </div>
+            <button onClick=${onClose} class="text-blue-200 hover:text-white mt-1 shrink-0">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="flex-1 p-6 space-y-6">
+
+          <section>
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-semibold uppercase tracking-widest text-slate-400">Identity</span>
+              <${SrcBadge} label=${s.registry.label} url=${s.registry.url}/>
+            </div>
+            <div class="bg-slate-50 rounded-xl p-4">
+              <${FieldRow} label="Industry" value=${`${c.industry} (${c.industry_code})`}/>
+              <${FieldRow} label="Municipality" value=${c.municipality}/>
+              <${FieldRow} label="Address" value=${c.address}/>
+              <${FieldRow} label="Registered" value=${c.registered}/>
+              <${FieldRow} label="Legal form" value=${c.legal_form}/>
+              <${FieldRow} label="Employees" value=${c.employees} isNull=${c.employees==null}/>
+              <${FieldRow} label="Website" value=${c.website?html`<a href=${`https://${c.website}`} target="_blank" class="text-blue-600 hover:underline">${c.website}</a>`:null} isNull=${!c.website}/>
+            </div>
+          </section>
+
+          <section>
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                Financials ${f?html`<span class="text-blue-500 normal-case ml-1">· ${f.year}</span>`:''}
+              </span>
+              ${s.financials?html`<${SrcBadge} label=${s.financials.label} url=${s.financials.url}/>`:
+                html`<span class="text-xs text-slate-300 font-mono italic">no filing found</span>`}
+            </div>
+            <div class="bg-slate-50 rounded-xl p-4">
+              ${f?html`
+                <${FieldRow} label="Revenue" value=${nok(f.revenue)} isNull=${f.revenue==null}/>
+                <${FieldRow} label="Operating result" value=${nok(f.op)} isNull=${f.op==null}/>
+                <${FieldRow} label="Annual result" value=${html`<span class=${f.result<0?'text-red-600':'text-green-600'}>${nok(f.result)}</span>`} isNull=${f.result==null}/>
+                <${FieldRow} label="Total assets" value=${nok(f.assets)} isNull=${f.assets==null}/>
+                <${FieldRow} label="Debt / liabilities" value=${nok(f.debt)} isNull=${f.debt==null}/>
+              `:html`<div class="text-center py-4 text-slate-400 text-sm italic">No financial filing available.</div>`}
+            </div>
+          </section>
+
+          <section>
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-semibold uppercase tracking-widest text-slate-400">People & Roles</span>
+              <${SrcBadge} label=${s.registry.label} url=${s.registry.url}/>
+            </div>
+            ${c.roles.length?html`
+              <div class="space-y-2">
+                ${c.roles.map((r,i)=>html`
+                  <div key=${i} class="flex items-center gap-3 bg-slate-50 rounded-lg px-4 py-2.5">
+                    <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0">
+                      ${initials(r.name)}
+                    </div>
+                    <div>
+                      <div class="text-sm font-semibold text-slate-800">${r.name}</div>
+                      <div class="text-xs text-slate-500">${r.role}${r.since?` · since ${r.since}`:''}</div>
+                    </div>
+                  </div>`)}
+              </div>`:
+              html`<div class="bg-slate-50 rounded-xl p-4 text-center text-slate-400 text-sm italic">No registered roles on record.</div>`}
+          </section>
+
+          <section>
+            <div class="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Research Agent</div>
+            <${AgentPanel} company=${c}/>
+            <p class="text-xs text-slate-400 mt-2 font-mono">Reads only the fields above · missing values → "not reported" · never guesses</p>
+          </section>
+
+        </div>
+      </div>
+    </div>`;
+};
+
+/* ── STATS BAR ───────────────────────────────────────────────────────────── */
+const StatsBar=()=>{
+  const wf=COMPANIES.filter(c=>c.financials).length;
+  const ws=COMPANIES.filter(c=>c.website).length;
+  const we=COMPANIES.filter(c=>c.employees!=null).length;
+  const wm=new Set(COMPANIES.map(c=>c.municipality)).size;
+  return html`
+    <div class="border-b border-slate-200 bg-white">
+      <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap gap-x-8 gap-y-2">
+        ${[['Company records',COMPANIES.length],['Financial filings',`${wf}/${COMPANIES.length}`],['Website signals',`${ws}/${COMPANIES.length}`],['Employee data',`${we}/${COMPANIES.length}`],['Municipalities',wm]]
+          .map(([label,val])=>html`
+            <div key=${label} class="flex items-baseline gap-2">
+              <span class="text-xl font-bold text-blue-700 tabular-nums">${val}</span>
+              <span class="text-xs text-slate-400 uppercase tracking-wide font-mono">${label}</span>
+            </div>`)}
+      </div>
+    </div>`;
+};
+
+/* ── METHOD ──────────────────────────────────────────────────────────────── */
+const Method=()=>html`
+  <section class="bg-slate-900 text-white py-12 px-4">
+    <div class="max-w-4xl mx-auto">
+      <div class="text-xs font-mono text-slate-400 uppercase tracking-widest mb-4">Our approach</div>
+      <h2 class="text-2xl font-bold mb-8">Three principles, applied to every record</h2>
+      <div class="grid md:grid-cols-3 gap-5">
+        ${[['01','Registry first','Every fact originates from a government-issued source — Enhetsregisteret or Regnskapsregisteret. No inference, no enrichment from unverified third parties.'],
+           ['02','Evidence beside facts','Each data group carries its upstream source and retrieval date. A field absent from the source is shown as "Not reported" — never filled with an estimate.'],
+           ['03','Agent stays grounded','The research agent\'s context is strictly the open company record. It cannot access the internet or other profiles. A missing value is always "not reported."']]
+          .map(([num,title,desc])=>html`
+            <div key=${num} class="border border-slate-700 rounded-xl p-5 hover:border-blue-500 transition-colors">
+              <div class="text-blue-400 font-mono text-2xl font-bold mb-2">${num}</div>
+              <div class="font-semibold text-white mb-2">${title}</div>
+              <div class="text-slate-400 text-sm leading-relaxed">${desc}</div>
+            </div>`)}
+      </div>
+    </div>
+  </section>`;
+
+/* ── SOURCES ─────────────────────────────────────────────────────────────── */
+const Sources=()=>html`
+  <section class="bg-white py-10 px-4 border-t border-slate-200">
+    <div class="max-w-4xl mx-auto">
+      <div class="text-xs font-mono text-slate-400 uppercase tracking-widest mb-3">Upstream data</div>
+      <h2 class="text-xl font-bold text-slate-800 mb-5">Sources & verification</h2>
+      <div class="space-y-3">
+        ${[{name:'Enhetsregisteret (Brønnøysundregistrene)',url:'https://www.brreg.no',desc:'Norwegian Central Coordinating Register for Legal Entities. Source of: name, org number, status, legal form, address, NACE code, employee count, registered roles.'},
+           {name:'Regnskapsregisteret (Brønnøysundregistrene)',url:'https://www.brreg.no/regnskapsregisteret',desc:'Norwegian Accounts Register. Source of: revenue, operating result, annual result, total assets, debt/liabilities from the most recent annual filing.'},
+           {name:'Company websites (self-declared)',url:null,desc:'Website URLs are self-reported by companies in the Enhetsregisteret. NorBiz does not independently crawl or verify website content.'}]
+          .map(s=>html`
+            <div key=${s.name} class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+              <div class="flex items-start justify-between gap-3 mb-1 flex-wrap">
+                <span class="font-semibold text-slate-800 text-sm">${s.name}</span>
+                <div class="flex items-center gap-3 shrink-0">
+                  <span class="text-xs font-mono text-slate-400">Sample: ${SD}</span>
+                  ${s.url&&html`<a href=${s.url} target="_blank" rel="noopener noreferrer" class="text-xs text-blue-600 hover:underline font-mono">verify →</a>`}
+                </div>
+              </div>
+              <p class="text-sm text-slate-500">${s.desc}</p>
+            </div>`)}
+      </div>
+    </div>
+  </section>`;
+
+/* ── MAIN APP ────────────────────────────────────────────────────────────── */
+function App(){
+  const [search,setSearch]=useState('');
+  const [sort,setSort]=useState('complete');
+  const [fi,setFi]=useState('all');
+  const [fm,setFm]=useState('all');
+  const [fs,setFs]=useState('all');
+  const [selected,setSelected]=useState(null);
+  const [hs,setHs]=useState('');
+  const lookupRef=useRef(null);
+
+  const filtered=useMemo(()=>{
+    const q=search.toLowerCase();
+    let r=COMPANIES.filter(c=>{
+      if(q&&!c.name.toLowerCase().includes(q)&&!c.org.includes(q)&&!c.municipality.toLowerCase().includes(q))return false;
+      if(fi!=='all'&&c.industry!==fi)return false;
+      if(fm!=='all'&&c.municipality!==fm)return false;
+      if(fs!=='all'&&c.status!==fs)return false;
+      return true;
+    });
+    if(sort==='complete')r.sort((a,b)=>score(b)-score(a));
+    else if(sort==='alpha')r.sort((a,b)=>a.name.localeCompare(b.name));
+    else if(sort==='employees')r.sort((a,b)=>(b.employees??-1)-(a.employees??-1));
+    else if(sort==='revenue')r.sort((a,b)=>(b.financials?.revenue??-1)-(a.financials?.revenue??-1));
+    else if(sort==='registered')r.sort((a,b)=>b.registered.localeCompare(a.registered));
+    return r;
+  },[search,sort,fi,fm,fs]);
+
+  const heroGo=e=>{
+    e.preventDefault();
+    setSearch(hs);
+    lookupRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
+  };
+
+  const clearAll=()=>{ setSearch('');setHs('');setFi('all');setFm('all');setFs('all'); };
+  const hasFilter=search||fi!=='all'||fm!=='all'||fs!=='all';
+
+  return html`
+    <div class="min-h-screen bg-slate-50">
+
+      <!-- HERO -->
+      <header class="bg-gradient-to-br from-blue-950 via-blue-900 to-blue-800 text-white py-16 px-4">
+        <div class="max-w-3xl mx-auto text-center">
+          <div class="inline-flex items-center gap-2 bg-blue-800/60 border border-blue-600/40 rounded-full px-3 py-1 mb-6">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"/>
+            <span class="text-xs font-mono text-blue-200 uppercase tracking-wider">PUBLIC SAMPLE · DATED FIXTURE · Sep 2026</span>
+          </div>
+          <h1 class="text-5xl font-bold mb-2 tracking-tight">NorBiz</h1>
+          <p class="text-blue-200 text-lg mb-8">Norwegian Company Intelligence · Evidence-first · Source-attributed</p>
+          <form onSubmit=${heroGo} class="flex max-w-xl mx-auto gap-2">
+            <input value=${hs} onChange=${e=>setHs(e.target.value)}
+              placeholder="Company name, org number or municipality…"
+              class="flex-1 bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-blue-300 focus:outline-none focus:border-white focus:bg-white/15 transition-all"/>
+            <button type="submit"
+              class="bg-white text-blue-900 font-semibold rounded-xl px-6 py-3 hover:bg-blue-50 transition-colors shrink-0">
+              Search
+            </button>
+          </form>
+          <button onClick=${()=>lookupRef.current?.scrollIntoView({behavior:'smooth'})}
+            class="mt-4 text-blue-300 hover:text-white text-sm underline transition-colors">
+            Browse all ${COMPANIES.length} companies ↓
+          </button>
+        </div>
+      </header>
+
+      <${StatsBar}/>
+
+      <!-- LOOKUP -->
+      <main class="max-w-6xl mx-auto px-4 py-8" ref=${lookupRef}>
+        <div class="flex flex-col sm:flex-row gap-3 mb-3">
+          <input value=${search} onChange=${e=>setSearch(e.target.value)}
+            placeholder="Search name, org number, municipality…"
+            class="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 bg-white"/>
+          <select value=${sort} onChange=${e=>setSort(e.target.value)}
+            class="border border-slate-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-blue-400">
+            <option value="complete">Most complete</option>
+            <option value="revenue">Largest revenue</option>
+            <option value="employees">Largest team</option>
+            <option value="registered">Recently registered</option>
+            <option value="alpha">A → Z</option>
+          </select>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-4">
+          <select value=${fi} onChange=${e=>setFi(e.target.value)}
+            class="border border-slate-200 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:border-blue-400">
+            <option value="all">All industries</option>
+            ${INDUSTRIES.map(i=>html`<option key=${i} value=${i}>${i.length>45?i.slice(0,45)+'…':i}</option>`)}
+          </select>
+          <select value=${fm} onChange=${e=>setFm(e.target.value)}
+            class="border border-slate-200 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:border-blue-400">
+            <option value="all">All municipalities</option>
+            ${MUNIS.map(m=>html`<option key=${m} value=${m}>${m}</option>`)}
+          </select>
+          <select value=${fs} onChange=${e=>setFs(e.target.value)}
+            class="border border-slate-200 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:border-blue-400">
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          ${hasFilter&&html`
+            <button onClick=${clearAll}
+              class="border border-slate-200 rounded-lg px-3 py-2 text-xs bg-white text-slate-500 hover:border-red-300 hover:text-red-500 transition-colors">
+              Clear ×
+            </button>`}
+        </div>
+        <div class="text-xs text-slate-400 font-mono mb-4">
+          ${filtered.length} ${filtered.length===1?'company':'companies'} found${filtered.length<COMPANIES.length?` · ${COMPANIES.length-filtered.length} filtered`:''}
+        </div>
+        ${filtered.length===0?html`
+          <div class="text-center py-16 text-slate-400">
+            <div class="text-4xl mb-3">🔍</div>
+            <div class="font-medium">No companies match your filters</div>
+            <button onClick=${clearAll} class="mt-3 text-blue-500 hover:underline text-sm">Clear filters</button>
+          </div>`:html`
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            ${filtered.map(c=>html`<${CompanyCard} key=${c.id} company=${c} onClick=${()=>setSelected(c)}/>`)}
+          </div>`}
+      </main>
+
+      <${Method}/>
+      <${Sources}/>
+
+      <!-- FOOTER -->
+      <footer class="bg-slate-900 text-slate-400 py-8 px-4">
+        <div class="max-w-4xl mx-auto">
+          <div class="flex justify-between items-start gap-4 mb-4 flex-wrap">
+            <div>
+              <div class="text-white font-bold text-lg">NorBiz</div>
+              <div class="text-sm">Norwegian Company Intelligence</div>
+            </div>
+            <div class="text-xs font-mono text-slate-500 text-right">
+              <div>Sample pulled: ${SD}</div>
+              <div>${COMPANIES.length} fixture records · Signalpost project</div>
+            </div>
+          </div>
+          <div class="border-t border-slate-800 pt-4 text-xs text-slate-500 leading-relaxed">
+            <strong class="text-slate-400">Disclaimer:</strong> This is a dated fixture sample, not a continuously refreshed production service.
+            Records were pulled from public Norwegian government registers (Brønnøysundregistrene) around ${SD}.
+            Financial figures reflect the most recent available annual filing and may not reflect current conditions.
+            Verify all material facts directly with the source registers before relying on this data.
+          </div>
+        </div>
+      </footer>
+
+      ${selected&&html`<${Drawer} company=${selected} onClose=${()=>setSelected(null)}/>`}
+    </div>`;
+}
+
+createRoot(document.getElementById('root')).render(html`<${App}/>`);
+</script>
+</body>
+</html>
