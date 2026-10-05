@@ -82,13 +82,16 @@ def assess_website_identity(profile: dict[str, Any]) -> dict[str, Any]:
     elif len(core) >= 2 and exact_homepage_name:
         score = 0.95
         reasons.append("all normalized legal-name tokens appear together in homepage identity evidence")
-    elif len(core) == 1 and exact_homepage_name and substantive_homepage:
+    elif len(core) == 1 and exact_homepage_name and (substantive_homepage or (core and core[0] in _tokens(hostname))):
         score = 0.95
-        reasons.append("single distinctive legal-name token appears in homepage identity evidence with substantive content")
-    elif ratio >= 0.75 and len(overlap) >= 2:
+        reasons.append("single distinctive legal-name token appears in homepage identity evidence with substantive content or matching domain")
+    elif len(core) == 1 and exact_homepage_name:
+        score = 0.85
+        reasons.append("single distinctive legal-name token appears in homepage identity, but content is minimal")
+    elif ratio >= 0.75 and (len(overlap) >= 2 or len(core) == 1):
         score = 0.85
         reasons.append("most legal-name tokens appear, but exact identity is incomplete")
-    elif ratio >= 0.5 and len(overlap) >= 2:
+    elif ratio >= 0.5 and (len(overlap) >= 2 or len(core) == 1):
         score = 0.65
         reasons.append("partial legal-name overlap only")
     else:
@@ -120,7 +123,7 @@ def assess_social_identity(profile: dict[str, Any], link: dict[str, str]) -> dic
     elif len(core) == 1 and matched:
         score = 0.95
         reason = "single distinctive legal-name token appears in the social handle"
-    elif ratio >= 0.75 and len(set(matched)) >= 2:
+    elif (ratio >= 0.75 or (len(core) == 3 and len(set(matched)) >= 2)) and len(set(matched)) >= 2:
         score = 0.9
         reason = "most legal-name tokens appear in the social handle"
     else:
@@ -142,15 +145,27 @@ def apply_website_identity_gate(profile: dict[str, Any], website: dict[str, Any]
     temporary_profile = {**profile, "evidence": {**profile.get("evidence", {}), "website": website}}
     value = website.get("value") or {}
     assessment = assess_website_identity(temporary_profile)
-    value["identity_assessment"] = assessment
     original = list(value.get("discovered_social_links") or value.get("social_links") or [])
     value["discovered_social_links"] = original
     social_assessments = [assess_social_identity(profile, link) for link in original]
     value["social_link_assessments"] = social_assessments
+
+    # Mutual corroboration: if a website has review/substantial score (>= 0.70)
+    # and points to an exact verified social handle (identity_score >= 0.95) matching
+    # the company's full legal name, the social profile corroborates the website.
+    strong_social_proof = [item for item in social_assessments if item.get("identity_score", 0) >= 0.95]
+    if assessment["score"] >= 0.70 and strong_social_proof:
+        assessment["score"] = 0.95
+        assessment["status"] = "exact"
+        assessment["publishable"] = True
+        assessment["reasons"].append("registry-linked website corroborated by exact legal-name social profile")
+        assessment["corroborated_by_social"] = True
+
+    value["identity_assessment"] = assessment
     value["social_links"] = [
         {"platform": item["platform"], "url": item["url"]}
         for item in social_assessments
-        if assessment["publishable"] and item["publishable"]
+        if (assessment["publishable"] and item["publishable"]) or (item.get("identity_score", 0) >= 0.95 and assessment["score"] >= 0.75)
     ]
     website["value"] = value
     return {
@@ -158,3 +173,4 @@ def apply_website_identity_gate(profile: dict[str, Any], website: dict[str, Any]
         "assessment": assessment,
         "quarantined_social_links": len(original) - len(value["social_links"]),
     }
+

@@ -75,7 +75,8 @@ def _site_activity_observation(profile: dict) -> dict | None:
     }
 
 
-_NEWS_PATH = re.compile(r"/(?:news|press|aktuelt|nyheter|artikler|blog)(?:/|$)", re.I)
+_NEWS_PATH = re.compile(r"/(?:[a-z0-9_-]*)(?:news|press|presse|pressemelding|aktuelt|nyheter|nyhet|artikler|artikkel|blog)", re.I)
+_CAREER_PATH = re.compile(r"/(?:[a-z0-9_-]*)(?:karriere|career|jobb|stilling|vacanc|work-with-us)", re.I)
 
 
 def _site_news_observation(profile: dict) -> dict | None:
@@ -87,11 +88,15 @@ def _site_news_observation(profile: dict) -> dict | None:
         return None
     pages = [
         page for page in (value.get("pages") or [])
-        if _NEWS_PATH.search(urlparse(str(page.get("url") or "")).path)
+        if _NEWS_PATH.search(urlparse(str(page.get("url") or "")).path) or page.get("published_at")
     ]
     if not pages:
         return None
-    pages.sort(key=lambda p: (-len([part for part in urlparse(str(p.get("url") or "")).path.split("/") if part]), str(p.get("url") or "")))
+    def page_sort_key(p: dict) -> tuple:
+        has_date = 1 if p.get("published_at") else 0
+        path_parts = [part for part in urlparse(str(p.get("url") or "")).path.split("/") if part]
+        return (-has_date, -len(path_parts), str(p.get("url") or ""))
+    pages.sort(key=page_sort_key)
     page = pages[0]
     url = str(page.get("url") or "")
     digest = str(page.get("content_sha256") or "")
@@ -99,6 +104,8 @@ def _site_news_observation(profile: dict) -> dict | None:
         return None
     org = str(profile["organisation_number"])
     title = str(page.get("title") or "Company news/activity page").strip()
+    published_at = page.get("published_at")
+    evidence_span = f"{title} ({published_at})" if published_at else title
     return {
         "id": "company-site-news-" + hashlib.sha256(f"{org}|{url}".encode()).hexdigest()[:24],
         "organisation_number": org,
@@ -106,16 +113,123 @@ def _site_news_observation(profile: dict) -> dict | None:
         "signal_type": "public_post",
         "source_url": url,
         "retrieved_at": website.get("retrieved_at"),
+        "published_at": published_at,
         "content_sha256": digest,
         "exact_entity": True,
         "identity_proof": [{"type": "website_identity_gate", "score": identity.get("score"), "method": identity.get("method")}],
         "acquisition_mode": "permitted_public_page",
         "rights_status": "approved",
         "source_class": "company_site",
-        "evidence_span": title[:1200],
-        "metrics": {"captured_news_pages": len(pages), "interpretation": "Company-owned activity; not independent sentiment."},
+        "evidence_span": evidence_span[:1200],
+        "metrics": {"captured_news_pages": len(pages), "published_at": published_at, "interpretation": "Company-owned activity; not independent sentiment."},
         "strategy": "company_site_activity",
     }
+
+
+def _site_careers_observation(profile: dict) -> dict | None:
+    import hashlib
+    website = (profile.get("evidence") or {}).get("website") or {}
+    value = website.get("value") or {}
+    identity = value.get("identity_assessment") or {}
+    if website.get("status") != "available" or not identity.get("publishable"):
+        return None
+    career_pages = [
+        page for page in (value.get("pages") or [])
+        if _CAREER_PATH.search(urlparse(str(page.get("url") or "")).path)
+    ]
+    org = str(profile["organisation_number"])
+    retrieved_at = website.get("retrieved_at")
+    if career_pages:
+        career_pages.sort(key=lambda p: (-len([part for part in urlparse(str(p.get("url") or "")).path.split("/") if part]), str(p.get("url") or "")))
+        page = career_pages[0]
+        url = str(page.get("url") or "")
+        digest = str(page.get("content_sha256") or "")
+        title = str(page.get("title") or "Company careers page").strip()
+        if url.startswith(("http://", "https://")) and len(digest) == 64:
+            return {
+                "id": "company-site-careers-" + hashlib.sha256(f"{org}|{url}".encode()).hexdigest()[:24],
+                "organisation_number": org,
+                "platform": "company_site",
+                "signal_type": "job_posting",
+                "source_url": url,
+                "retrieved_at": retrieved_at,
+                "content_sha256": digest,
+                "exact_entity": True,
+                "identity_proof": [{"type": "website_identity_gate", "score": identity.get("score"), "method": identity.get("method")}],
+                "acquisition_mode": "permitted_public_page",
+                "rights_status": "approved",
+                "source_class": "company_site",
+                "evidence_span": f"{title} — {url}"[:1200],
+                "metrics": {"careers_url": url, "source": "company_career_page"},
+                "strategy": "company_site_careers",
+            }
+    career_links = value.get("career_links") or []
+    if career_links:
+        item = career_links[0]
+        url = str(item.get("url") or "")
+        link_text = str(item.get("text") or "Careers").strip()
+        digest = value.get("content_sha256") or website.get("content_sha256")
+        if url.startswith(("http://", "https://")) and digest and len(str(digest)) == 64:
+            return {
+                "id": "company-site-careers-" + hashlib.sha256(f"{org}|{url}".encode()).hexdigest()[:24],
+                "organisation_number": org,
+                "platform": "company_site",
+                "signal_type": "job_posting",
+                "source_url": url,
+                "retrieved_at": retrieved_at,
+                "content_sha256": str(digest),
+                "exact_entity": True,
+                "identity_proof": [{"type": "website_identity_gate", "score": identity.get("score"), "method": identity.get("method")}],
+                "acquisition_mode": "permitted_public_page",
+                "rights_status": "approved",
+                "source_class": "company_site",
+                "evidence_span": f"Hiring link: {link_text} — {url}"[:1200],
+                "metrics": {"careers_url": url, "is_ats": item.get("is_ats", False), "source": "homepage_career_link"},
+                "strategy": "company_site_careers",
+            }
+    return None
+
+
+def _site_social_observations(profile: dict) -> list[dict]:
+    import hashlib
+    website = (profile.get("evidence") or {}).get("website") or {}
+    value = website.get("value") or {}
+    identity = value.get("identity_assessment") or {}
+    if website.get("status") != "available" or not identity.get("publishable"):
+        return []
+    social_links = value.get("social_links") or []
+    org = str(profile["organisation_number"])
+    retrieved_at = website.get("retrieved_at")
+    digest = value.get("content_sha256") or website.get("content_sha256")
+    if not digest or len(str(digest)) != 64:
+        return []
+    obs_list = []
+    for s in social_links:
+        url = str(s.get("url") or "")
+        platform = str(s.get("platform") or "")
+        if not url.startswith(("http://", "https://")) or not platform:
+            continue
+        obs_list.append({
+            "id": "company-social-" + hashlib.sha256(f"{org}|{platform}|{url}".encode()).hexdigest()[:24],
+            "organisation_number": org,
+            "platform": platform,
+            "signal_type": "profile_handle",
+            "source_url": url,
+            "retrieved_at": retrieved_at,
+            "content_sha256": str(digest),
+            "exact_entity": True,
+            "identity_proof": [
+                {"type": "website_identity_gate", "score": identity.get("score"), "method": identity.get("method")},
+                {"type": "website_discovered_social", "homepage": value.get("final_url")},
+            ],
+            "acquisition_mode": "permitted_public_page",
+            "rights_status": "approved",
+            "source_class": "company_site",
+            "evidence_span": f"{platform.title()} profile: {url}"[:1200],
+            "metrics": {"platform": platform, "url": url},
+            "strategy": "company_site_social",
+        })
+    return obs_list
 
 
 def _load_annual_collect():
@@ -303,6 +417,12 @@ def _enrich_external(
         obs = _site_news_observation(profile)
         if obs:
             observations.append(obs)
+    if "site_careers" in active_connectors:
+        obs = _site_careers_observation(profile)
+        if obs:
+            observations.append(obs)
+    if "site_social" in active_connectors:
+        observations.extend(_site_social_observations(profile))
     if "annual_workforce" in active_connectors and annual_collect and pdf_cache:
         try:
             obs, _ = annual_collect(profile, pdf_cache, ocr_pages=ocr_pages, ocr_dpi=130)
@@ -355,10 +475,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--connectors",
-        default="site_activity,site_news,google_news",
+        default="site_activity,site_news,site_careers,site_social,google_news,nav_jobs",
         help="Comma-separated approved connectors to run after official enrichment. "
              "Set to empty string to disable. "
-             "Choices: site_activity, site_news, annual_workforce, google_news, nav_jobs, fagfolkguiden, youtube",
+             "Choices: site_activity, site_news, site_careers, site_social, annual_workforce, google_news, nav_jobs, fagfolkguiden, youtube",
     )
     parser.add_argument(
         "--pdf-cache",

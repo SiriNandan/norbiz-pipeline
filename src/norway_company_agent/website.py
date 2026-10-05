@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import ipaddress
 import re
@@ -10,6 +11,7 @@ import urllib.parse
 import urllib.request
 import urllib.robotparser
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -30,11 +32,18 @@ SOCIAL_HOSTS = {
     "youtu.be": "youtube",
     "tiktok.com": "tiktok",
 }
-PRIORITY_TERMS = (
+IDENTITY_TERMS = (
     "om-oss", "om_oss", "about", "kontakt", "contact", "ledelse", "management",
     "team", "people", "locations", "lokasjoner", "avdelinger", "butikker",
-    "news", "press", "aktuelt", "nyheter",
 )
+NEWS_TERMS = (
+    "aktuelt", "nyheter", "news", "press", "artikler", "pressemeldinger", "presse", "blog",
+)
+CAREER_TERMS = (
+    "karriere", "jobb", "stilling", "stillinger", "careers", "career", "vacancies", "ledige-stillinger", "work-with-us",
+)
+PRIORITY_TERMS = IDENTITY_TERMS + NEWS_TERMS + CAREER_TERMS
+
 
 
 def assert_public_url(url: str) -> None:
@@ -186,24 +195,176 @@ def normalize_social_url(url: str) -> dict[str, str] | None:
     return {"platform": platform, "url": f"https://{canonical_host}/{'/'.join(parts)}"}
 
 
-def _priority_links(base_url: str, soup: BeautifulSoup, limit: int = 4) -> list[str]:
+ATS_HOSTS = (
+    "webcruiter.no", "webcruiter.com", "teamtailor.com", "jobbnorge.no",
+    "recman.no", "easycruit.com", "myworkdayjobs.com", "emply.com", "reachmee.com",
+    "arbeidsplassen.nav.no",
+)
+
+
+def extract_page_date(soup: BeautifulSoup) -> str | None:
+    # 1. Standard HTML5 <time> tag
+    for time_tag in soup.select("time[datetime], time[pubdate]"):
+        val = str(time_tag.get("datetime") or time_tag.get_text(" ", strip=True) or "").strip()
+        if val:
+            try:
+                dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                return dt.isoformat()
+            except Exception:
+                m = re.search(r"(\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:?\d{2}|Z)?)?)", val, re.I)
+                if m:
+                    return m.group(1).replace(" ", "T")
+
+    # 2. Meta tags
+    meta_attrs = [
+        ('meta[property="article:published_time"]', "content"),
+        ('meta[name="article:published_time"]', "content"),
+        ('meta[property="og:article:published_time"]', "content"),
+        ('meta[property="og:published_time"]', "content"),
+        ('meta[name="publication_date"]', "content"),
+        ('meta[name="date"]', "content"),
+        ('meta[name="pubdate"]', "content"),
+        ('meta[name="DC.date.issued"]', "content"),
+        ('meta[name="dc.date"]', "content"),
+    ]
+    for sel, attr in meta_attrs:
+        tag = soup.select_one(sel)
+        if tag and tag.get(attr):
+            val = str(tag.get(attr)).strip()
+            try:
+                dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                return dt.isoformat()
+            except Exception:
+                m = re.search(r"(\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:?\d{2}|Z)?)?)", val, re.I)
+                if m:
+                    return m.group(1).replace(" ", "T")
+
+    # 3. Microdata itemprop
+    for item in soup.select("[itemprop='datePublished'], [itemprop='dateCreated']"):
+        val = str(item.get("content") or item.get("datetime") or item.get_text(" ", strip=True) or "").strip()
+        if val:
+            try:
+                dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                return dt.isoformat()
+            except Exception:
+                m = re.search(r"(\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:?\d{2}|Z)?)?)", val, re.I)
+                if m:
+                    return m.group(1).replace(" ", "T")
+
+    # 4. JSON-LD datePublished
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            data = json.loads(script.get_text())
+            def _find_date(node: Any) -> str | None:
+                if isinstance(node, dict):
+                    for k in ("datePublished", "dateCreated", "dateModified"):
+                        if node.get(k) and isinstance(node[k], str):
+                            return node[k].strip()
+                    for v in node.values():
+                        res = _find_date(v)
+                        if res:
+                            return res
+                elif isinstance(node, list):
+                    for elem in node:
+                        res = _find_date(elem)
+                        if res:
+                            return res
+                return None
+            found_date = _find_date(data)
+            if found_date:
+                try:
+                    dt = datetime.fromisoformat(found_date.replace("Z", "+00:00"))
+                    return dt.isoformat()
+                except Exception:
+                    m = re.search(r"(\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:?\d{2}|Z)?)?)", found_date, re.I)
+                    if m:
+                        return m.group(1).replace(" ", "T")
+        except Exception:
+            continue
+
+    return None
+
+
+def _career_links(base_url: str, soup: BeautifulSoup) -> list[dict[str, Any]]:
+    found: dict[str, dict[str, Any]] = {}
+    for anchor in soup.select("a[href]"):
+        href = str(anchor.get("href") or "").strip()
+        if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+            continue
+        url = urllib.parse.urljoin(base_url, href)
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            continue
+        host = (parsed.hostname or "").casefold()
+        path = (parsed.path or "").casefold()
+        text = anchor.get_text(" ", strip=True).casefold()
+        is_ats = any(ats in host for ats in ATS_HOSTS)
+        is_career_term = any(term in path or term in text for term in CAREER_TERMS)
+        if is_ats or is_career_term:
+            clean = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path or "/", "", "", ""))
+            if clean not in found:
+                found[clean] = {
+                    "url": clean,
+                    "text": anchor.get_text(" ", strip=True)[:100],
+                    "is_ats": is_ats,
+                }
+    return list(found.values())[:10]
+
+
+def _priority_links(base_url: str, soup: BeautifulSoup, limit: int = 6) -> list[str]:
     base = urllib.parse.urlparse(base_url)
-    candidates: dict[str, int] = {}
+    identity_candidates: dict[str, int] = {}
+    news_candidates: dict[str, int] = {}
+    career_candidates: dict[str, int] = {}
+
     for anchor in soup.select("a[href]"):
         href = str(anchor.get("href") or "").strip()
         url = urllib.parse.urljoin(base_url, href)
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in {"http", "https"} or parsed.netloc.lower() != base.netloc.lower():
             continue
-        haystack = (parsed.path + " " + anchor.get_text(" ", strip=True)).casefold()
-        rank = next((index for index, term in enumerate(PRIORITY_TERMS) if term in haystack), None)
-        if rank is None:
-            continue
         clean = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path or "/", "", "", ""))
         if clean.rstrip("/") == base_url.rstrip("/"):
             continue
-        candidates[clean] = min(rank, candidates.get(clean, rank))
-    return [url for url, _ in sorted(candidates.items(), key=lambda item: (item[1], item[0]))[:limit]]
+
+        path_lower = parsed.path.casefold()
+        text_lower = anchor.get_text(" ", strip=True).casefold()
+        haystack = path_lower + " " + text_lower
+
+        if any(term in haystack for term in NEWS_TERMS):
+            path_depth = len([p for p in path_lower.split("/") if p])
+            has_date = bool(re.search(r"/\d{4}/|\b202[0-9]\b", path_lower))
+            rank = 0 if has_date else (1 if path_depth >= 2 else 2)
+            news_candidates[clean] = min(rank, news_candidates.get(clean, rank))
+        elif any(term in haystack for term in CAREER_TERMS):
+            path_depth = len([p for p in path_lower.split("/") if p])
+            rank = 0 if path_depth >= 1 else 1
+            career_candidates[clean] = min(rank, career_candidates.get(clean, rank))
+        elif any(term in haystack for term in IDENTITY_TERMS):
+            rank = next((i for i, t in enumerate(IDENTITY_TERMS) if t in haystack), 10)
+            identity_candidates[clean] = min(rank, identity_candidates.get(clean, rank))
+
+    selected: list[str] = []
+    for u in [url for url, _ in sorted(identity_candidates.items(), key=lambda x: (x[1], x[0]))[:2]]:
+        selected.append(u)
+    for u in [url for url, _ in sorted(news_candidates.items(), key=lambda x: (x[1], x[0]))[:2]]:
+        if u not in selected:
+            selected.append(u)
+    for u in [url for url, _ in sorted(career_candidates.items(), key=lambda x: (x[1], x[0]))[:2]]:
+        if u not in selected:
+            selected.append(u)
+
+    remaining = (
+        [url for url, _ in sorted(news_candidates.items(), key=lambda x: (x[1], x[0])) if url not in selected] +
+        [url for url, _ in sorted(career_candidates.items(), key=lambda x: (x[1], x[0])) if url not in selected] +
+        [url for url, _ in sorted(identity_candidates.items(), key=lambda x: (x[1], x[0])) if url not in selected]
+    )
+    for u in remaining:
+        if len(selected) >= limit:
+            break
+        selected.append(u)
+
+    return selected[:limit]
 
 
 def _fetch_secondary_page(url: str, *, homepage_domain: str, timeout: float, max_bytes: int) -> tuple[dict[str, Any] | None, list[dict[str, str]], int, int, int, str | None]:
@@ -223,11 +384,13 @@ def _fetch_secondary_page(url: str, *, homepage_domain: str, timeout: float, max
         page_html = raw.decode("utf-8", errors="replace")
         page_soup = BeautifulSoup(page_html, "lxml")
         page_text = trafilatura.extract(page_html, url=final_url, include_links=False, include_tables=False, favor_precision=True) or ""
+        page_date = extract_page_date(page_soup)
         page = {
             "url": final_url,
             "title": page_soup.title.get_text(" ", strip=True)[:500] if page_soup.title else "",
             "main_text_excerpt": page_text[:5000],
-            "content_sha256": __import__("hashlib").sha256(raw).hexdigest(),
+            "content_sha256": hashlib.sha256(raw).hexdigest(),
+            "published_at": page_date,
         }
         return page, _social_links(final_url, page_soup), 2, len(raw), elapsed, None
     except Exception as exc:
@@ -289,6 +452,7 @@ def fetch_website(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_
         title = soup.title.get_text(" ", strip=True) if soup.title else ""
         description_tag = soup.select_one('meta[name="description"], meta[property="og:description"]')
         description = str(description_tag.get("content") or "").strip() if description_tag else ""
+        homepage_date = extract_page_date(soup)
         value = {
             "requested_url": normalized,
             "final_url": final_url,
@@ -297,11 +461,12 @@ def fetch_website(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_
             "description": description[:2000],
             "main_text_excerpt": text[:5000],
             "social_links": _social_links(final_url, soup),
+            "career_links": _career_links(final_url, soup),
             "structured_organisations": _jsonld_organisations(structured),
-            "content_sha256": __import__("hashlib").sha256(raw).hexdigest(),
+            "content_sha256": hashlib.sha256(raw).hexdigest(),
             "extraction_state": _extraction_state(text, soup),
         }
-        pages = [{"url": final_url, "title": title[:500], "main_text_excerpt": text[:5000], "content_sha256": value["content_sha256"]}]
+        pages = [{"url": final_url, "title": title[:500], "main_text_excerpt": text[:5000], "content_sha256": value["content_sha256"], "published_at": homepage_date}]
         social = value["social_links"]
         crawl_errors = []
         requests = 2

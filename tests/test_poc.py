@@ -55,6 +55,11 @@ from scripts.discover_linkedin_company_profiles import (  # noqa: E402
     official_site_aliases as linkedin_official_site_aliases,
     parse_exact_typeahead as parse_linkedin_exact_typeahead,
 )
+from scripts.run_competition_batch import (  # noqa: E402
+    _site_careers_observation,
+    _site_social_observations,
+    _site_news_observation as batch_site_news_observation,
+)
 
 
 class EvidenceTests(unittest.TestCase):
@@ -1329,6 +1334,145 @@ class VerifiedSiteSeedTests(unittest.TestCase):
             failed = subprocess.run(command, capture_output=True, text=True)
             self.assertNotEqual(failed.returncode, 0)
             self.assertIn("unknown organisations", failed.stderr)
+
+
+class ReviewerPracticesTests(unittest.TestCase):
+    def test_elopak_single_token_website_domain_gating(self):
+        profile = {
+            "name": "ELOPAK ASA",
+            "evidence": {
+                "website": {
+                    "value": {
+                        "final_url": "https://www.elopak.com/",
+                        "registered_domain": "elopak.com",
+                        "title": "Elopak | Sustainable Packaging Solutions",
+                        "main_text_excerpt": "Welcome",
+                        "pages": [{"url": "https://www.elopak.com/", "title": "Elopak", "main_text_excerpt": "Welcome"}],
+                        "social_links": [],
+                    }
+                }
+            }
+        }
+        assessment = assess_website_identity(profile)
+        self.assertTrue(assessment["publishable"])
+        self.assertEqual(assessment["status"], "exact")
+        self.assertGreaterEqual(assessment["score"], 0.90)
+
+    def test_g3_gausdal_social_corroboration_and_observation(self):
+        profile = {
+            "name": "G3 GAUSDAL TREINDUSTRIER SA",
+            "organisation_number": "811943622",
+            "evidence": {}
+        }
+        website = {
+            "status": "available",
+            "source_url": "https://g3i.no/",
+            "retrieved_at": "2026-09-28T12:00:00Z",
+            "content_sha256": "b" * 64,
+            "value": {
+                "final_url": "https://g3i.no/",
+                "registered_domain": "g3i.no",
+                "title": "G3 Gausdal Treindustrier",
+                "main_text_excerpt": "Treindustri",
+                "pages": [{"url": "https://g3i.no/", "title": "G3", "main_text_excerpt": "Tre"}],
+                "social_links": [
+                    {"platform": "linkedin", "url": "https://www.linkedin.com/company/g3-gausdal-treindustrier-sa"}
+                ],
+                "content_sha256": "b" * 64,
+            }
+        }
+        res = apply_website_identity_gate(profile, website)
+        self.assertEqual(res["assessment"]["status"], "exact")
+        self.assertTrue(res["assessment"]["publishable"])
+        self.assertEqual(len(website["value"]["social_links"]), 1)
+        self.assertEqual(
+            website["value"]["social_links"][0]["url"],
+            "https://www.linkedin.com/company/g3-gausdal-treindustrier-sa"
+        )
+        profile["evidence"]["website"] = website
+        social_obs = _site_social_observations(profile)
+        self.assertEqual(len(social_obs), 1)
+        self.assertEqual(social_obs[0]["platform"], "linkedin")
+        self.assertEqual(social_obs[0]["signal_type"], "profile_handle")
+        self.assertEqual(social_obs[0]["source_url"], "https://www.linkedin.com/company/g3-gausdal-treindustrier-sa")
+        self.assertTrue(publishable_observation(social_obs[0]))
+
+    def test_equinor_careers_observation(self):
+        profile = {
+            "name": "EQUINOR ASA",
+            "organisation_number": "923609016",
+            "evidence": {
+                "website": {
+                    "status": "available",
+                    "retrieved_at": "2026-09-28T12:00:00Z",
+                    "content_sha256": "c" * 64,
+                    "value": {
+                        "final_url": "https://www.equinor.com/",
+                        "registered_domain": "equinor.com",
+                        "title": "Equinor",
+                        "main_text_excerpt": "Energy company",
+                        "content_sha256": "c" * 64,
+                        "identity_assessment": {"publishable": True, "score": 0.95, "method": "exact_core"},
+                        "career_links": [{"url": "https://www.equinor.com/careers", "text": "Careers", "is_ats": False}],
+                        "pages": [
+                            {"url": "https://www.equinor.com/", "title": "Equinor", "main_text_excerpt": "Home", "content_sha256": "c" * 64},
+                            {"url": "https://www.equinor.com/careers", "title": "Careers at Equinor", "main_text_excerpt": "Join us", "content_sha256": "d" * 64},
+                        ],
+                    }
+                }
+            }
+        }
+        obs = _site_careers_observation(profile)
+        self.assertIsNotNone(obs)
+        self.assertEqual(obs["platform"], "company_site")
+        self.assertEqual(obs["signal_type"], "job_posting")
+        self.assertEqual(obs["source_url"], "https://www.equinor.com/careers")
+        self.assertEqual(obs["content_sha256"], "d" * 64)
+        self.assertTrue(publishable_observation(obs))
+
+    def test_sunnaas_sykehus_dated_news_observation(self):
+        url = "https://www.sunnaas.no/fag-og-forskning/kompetansesentre-og-tjenester/regional-kompetansetjeneste-for-rehabilitering-rkr/nyheter-rkr/bedre-sosial-funksjon-etter-hjerneskade/"
+        profile = {
+            "name": "SUNNAAS SYKEHUS HF",
+            "organisation_number": "883971752",
+            "evidence": {
+                "website": {
+                    "status": "available",
+                    "retrieved_at": "2026-09-28T12:00:00Z",
+                    "content_sha256": "e" * 64,
+                    "value": {
+                        "final_url": "https://www.sunnaas.no/",
+                        "registered_domain": "sunnaas.no",
+                        "title": "Sunnaas sykehus",
+                        "main_text_excerpt": "Rehabilitering",
+                        "identity_assessment": {"publishable": True, "score": 0.95, "method": "exact_core"},
+                        "pages": [
+                            {"url": "https://www.sunnaas.no/", "title": "Hjem", "main_text_excerpt": "Hjem", "content_sha256": "e" * 64},
+                            {
+                                "url": url,
+                                "title": "bedre sosial funksjon etter hjerneskade",
+                                "main_text_excerpt": "Artikkel tekst...",
+                                "content_sha256": "f" * 64,
+                                "published_at": "2025-09-22T20:00:00+02:00",
+                            },
+                        ],
+                    }
+                }
+            }
+        }
+        obs = batch_site_news_observation(profile)
+        self.assertIsNotNone(obs)
+        self.assertEqual(obs["source_url"], url)
+        self.assertEqual(obs["published_at"], "2025-09-22T20:00:00+02:00")
+        self.assertIn("2025-09-22T20:00:00+02:00", obs["evidence_span"])
+        self.assertEqual(obs["content_sha256"], "f" * 64)
+        self.assertTrue(publishable_observation(obs))
+
+        obs_script = site_news_observation(profile)
+        self.assertIsNotNone(obs_script)
+        self.assertEqual(obs_script["source_url"], url)
+        self.assertEqual(obs_script["published_at"], "2025-09-22T20:00:00+02:00")
+        self.assertTrue(publishable_observation(obs_script))
 
 
 if __name__ == "__main__":
